@@ -1,8 +1,5 @@
 
 import os
-import sys
-import pickle
-
 from NN.lstm import LSTM
 from Util.load_data import LoadData
 from Util.chars_auxiliary import CharsAuxi
