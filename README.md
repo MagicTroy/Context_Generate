@@ -2,6 +2,8 @@
 
 This repository used for generating context information based on Deep Learning tehcniques
 
-This branch using concatenation and attention layer both in the model.
+This version aim to concatenate auxiliary values, user ids, and item ids as feeding data into model.
 
-concate auxiliary values with characters and feeding user embedding and item embedding into attention layer.
+All of them are using one hot to represents, which all generate by tensorflow.
+
+

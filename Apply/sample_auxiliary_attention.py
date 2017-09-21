@@ -1,123 +1,116 @@
 
-from NN.lstm_attention import *
+from sklearn.metrics.pairwise import cosine_similarity
+from NN.lstm import *
 from Util.chars_auxiliary_attention import *
 
 
-def get_prim_one_hot_auxiliary_one_hot(chars_auxi, c, num_characters, appea, aroma, palat, taste, overa):
-    char_int, auxi_one_hot = chars_auxi.get_char_int_auxi_onehot(c, appea, aroma, palat, taste, overa)
-    char_ont_hot = np.eye(num_characters)[char_int]
-    return np.concatenate(([[char_ont_hot]], [[auxi_one_hot]]), axis=2)
-
-def get_prim_one_hot(chars_auxi, c, num_characters, auxiliary):
-    char_int, auxi_one_hot = chars_auxi.get_char_int_auxi(c, auxiliary)
-    char_ont_hot = np.eye(num_characters)[char_int]
-    return np.concatenate(([[char_ont_hot]], [[auxi_one_hot]]), axis=2)
+def get_word_by_cosine_similarity(word, word_vector, preds):
+    sim = cosine_similarity(word_vector, preds)
+    # print(sim)
+    select_index = sim.argsort()[::-1][0]
+    return word[select_index]
 
 
 def pick_top_n(preds, vocab_size, top_n):
     p = np.squeeze(preds)
+
     _p = p.copy()
 
     p[np.argsort(p)[:-top_n]] = 0
     p = p / np.sum(p)
     c = np.random.choice(vocab_size, 1, p=p)[0]  # get index
     return c, _p
-    # return c, np.sort(_p)[::-1][:top_n]
 
 
-def sample_auxiliary_one_hot(checkpoint, n_samples, lstm_size, num_characters,
-           num_auxi, appea, aroma, palat, taste, overa,
-           chars_auxi, prime, top_n=5):
-    samples = []
-    probability = []
+def generate_output_vector(sess, lstm, n_samples, user_attention, item_attention,
+                           auxiliary, primes):
+    generate_word = []
+    probabiliry = []
 
-    lstm = LSTM(num_characters=num_characters,
-                num_auxiliary=num_auxi,
-                lstm_size=lstm_size,
-                sampling=True)
+    new_state = sess.run(lstm.model.initial_state)
 
-    saver = tf.train.Saver()
-    with tf.Session() as sess:
-        saver.restore(sess, checkpoint)
-        new_state = sess.run(lstm.model.initial_state)
-        for c in prime:
-            x = get_prim_one_hot_auxiliary_one_hot(chars_auxi, c, num_characters, appea, aroma, palat, taste, overa)
-            feed = {lstm.model.inputs: x,
-                    lstm.model.keep_prob: 1.,
-                    lstm.model.initial_state: new_state}
-            preds, new_state = sess.run([lstm.model.preds, lstm.model.final_state],
-                                        feed_dict=feed)
+    auxiliary = np.array(auxiliary).reshape(1, 1, -1)
 
-        _char, _ = pick_top_n(preds, num_characters, top_n)
-        samples.append(chars_auxi.int_to_char[_char])
+    user_attention = np.array([user_attention]).reshape(1, 1)
+    item_attention = np.array([item_attention]).reshape(1, 1)
 
-        for i in range(n_samples):
-            x = get_prim_one_hot_auxiliary_one_hot(chars_auxi, chars_auxi.int_to_char[_char], num_characters, appea, aroma, palat, taste, overa)
-            feed = {lstm.model.inputs: x,
-                    lstm.model.keep_prob: 1.,
-                    lstm.model.initial_state: new_state}
-            preds, new_state = sess.run([lstm.model.preds, lstm.model.final_state],
-                                        feed_dict=feed)
+    for prime in primes:
 
-            _char, _p = pick_top_n(preds, num_characters, top_n)
-            samples.append(chars_auxi.int_to_char[_char])
-            probability.append(_p)
-    return ''.join(samples), np.array(probability)
+        prime_vector = np.array([prime]).reshape(1, 1)
 
 
-def sample_auxiliary(checkpoint, n_samples, lstm_size, num_characters,
-                     auxiliary, chars_auxi, prime, top_n=5):
-    samples = []
-    probability = []
+        # print(prime_vector, prime_vector.shape)
 
-    lstm = LSTM(num_characters=num_characters,
-                num_auxiliary=len(auxiliary),
-                lstm_size=lstm_size,
-                sampling=True)
+        feed = {lstm.model.inputs: prime_vector,
+                lstm.model.auxiliary: auxiliary,
+                lstm.model.user_attention: user_attention,
+                lstm.model.item_attention: item_attention,
+                lstm.model.keep_prob: 1.,
+                lstm.model.initial_state: new_state}
+        preds, new_state = sess.run([lstm.model.preds, lstm.model.final_state],
+                                    feed_dict=feed)
 
-    saver = tf.train.Saver()
-    with tf.Session() as sess:
-        saver.restore(sess, checkpoint)
-        new_state = sess.run(lstm.model.initial_state)
-        for c in prime:
-            x = get_prim_one_hot(chars_auxi, c, num_characters, auxiliary)
-            feed = {lstm.model.inputs: x,
-                    lstm.model.keep_prob: 1.,
-                    lstm.model.initial_state: new_state}
-            preds, new_state = sess.run([lstm.model.preds, lstm.model.final_state],
-                                        feed_dict=feed)
-
-        _char, _ = pick_top_n(preds, num_characters, top_n)
-        samples.append(chars_auxi.int_to_char[_char])
-
-        for i in range(n_samples):
-
-            if u''.join(samples[len(samples) - 7:]) == u'<#end#>':
-                return ''.join(samples[:len(samples) - 7]), np.array(probability)
-
-            x = get_prim_one_hot(chars_auxi, chars_auxi.int_to_char[_char], num_characters, auxiliary)
-            feed = {lstm.model.inputs: x,
-                    lstm.model.keep_prob: 1.,
-                    lstm.model.initial_state: new_state}
-            preds, new_state = sess.run([lstm.model.preds, lstm.model.final_state],
-                                        feed_dict=feed)
-
-            _char, _p = pick_top_n(preds, num_characters, top_n)
-            samples.append(chars_auxi.int_to_char[_char])
-            probability.append(_p)
-
-        # while chars_auxi.int_to_char[_char] != '.':
-        #     x = get_prim_one_hot(chars_auxi, chars_auxi.int_to_char[_char], num_characters, auxiliary)
-        #     feed = {lstm.model.inputs: x,
-        #             lstm.model.keep_prob: 1.,
-        #             lstm.model.initial_state: new_state}
-        #     preds, new_state = sess.run([lstm.model.preds, lstm.model.final_state],
-        #                                 feed_dict=feed)
+        # print(preds)
+        # print(np.sort(preds))
+        # print(np.sort(preds)[0][-1])
+        # print(np.argsort(preds)[0][-1])
         #
-        #     _char, _p = pick_top_n(preds, num_characters, top_n)
-        #     samples.append(chars_auxi.int_to_char[_char])
-        #     probability.append(_p)
-    return ''.join(samples), np.array(probability)
+        # print(pick_top_n(preds, vector_length, 1))
+
+    # print(prime_vector.shape, preds.shape)
+
+    next_word = np.argsort(preds)[0][-1]
+    generate_word.append(next_word)
+    probabiliry.append(preds)
+
+    for i in range(n_samples):
+
+        # print(next_word)
+
+        input_vector = np.array([next_word]).reshape(1, 1)
+
+        feed = {lstm.model.inputs: input_vector,
+                lstm.model.auxiliary: auxiliary,
+                lstm.model.user_attention: user_attention,
+                lstm.model.item_attention: item_attention,
+                lstm.model.keep_prob: 1.,
+                lstm.model.initial_state: new_state}
+        preds, new_state = sess.run([lstm.model.preds, lstm.model.final_state],
+                                    feed_dict=feed)
+
+        # print(preds)
+        # print(np.sort(preds))
+        # print(np.sort(preds)[0][-1])
+        # print(np.argsort(preds)[0][-1])
+
+        next_word = np.argsort(preds)[0][-1]
+
+        # print(next_word)
+
+        generate_word.append(next_word)
+        probabiliry.append(preds)
+
+    return generate_word, probabiliry
+
+
+def get_sample(checkpoint, n_samples, lstm_size, vector_length, num_user_attention, num_item_attention,
+               auxiliary, user_attention, item_attention, prime):
+
+    lstm = LSTM(vector_length=vector_length,
+                num_auxiliary=len(auxiliary),
+                num_user_attention=num_user_attention,
+                num_item_attention=num_item_attention,
+                lstm_size=lstm_size,
+                sampling=True)
+
+    saver = tf.train.Saver()
+    with tf.Session() as sess:
+        saver.restore(sess, checkpoint)
+
+        generate_word_index, probabiliry = generate_output_vector(sess, lstm, n_samples,
+                                                                  user_attention, item_attention, auxiliary, prime)
+
+    return generate_word_index, probabiliry
 
 
 

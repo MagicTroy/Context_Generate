@@ -1,21 +1,23 @@
-
 import os
+import sys
+import pickle
 
-from NN.lstm_attention import LSTM
-from Util.load_data import LoadData
+from NN.lstm import LSTM
+from Util.load_input import LoadData
 from Util.chars_auxiliary_attention import CharsAuxi
 
 import argparse
 import datetime
 from Util.log import get_logger
+
 log = get_logger()
 
 if __name__ == '__main__':
-
-    parser = argparse.ArgumentParser(description='char rnn')
+    parser = argparse.ArgumentParser(description='word lstm')
     parser.add_argument('-u', '--train_user_id', default='northyorksammy')
-    parser.add_argument('-f', '--file_path', default=os.environ['HOME'] + '/data/' + 'beeradvocate.db')
+    parser.add_argument('-f', '--file_path', default=os.environ['HOME'] + '/data/')
     parser.add_argument('-o', '--folder_name', default="{}/gcn/run_{}".format(os.environ['HOME'], datetime.datetime.now().isoformat()))
+    parser.add_argument('--data_size', default='', type=str)
     parser.add_argument('--lstm_size', default=128, type=int)
     parser.add_argument('--num_layers', default=2, type=int)
     parser.add_argument('--learning_rate', default=0.03, type=float)
@@ -32,31 +34,29 @@ if __name__ == '__main__':
 
     log.info('args: {}', args)
 
-    #if True: exit(1)
+    # if True: exit(1)
     train_user_id = args.train_user_id
     file_path = args.file_path
     folder_name = args.folder_name
 
-    #train_user_id = sys.argv[1]
-    #    file_path = sys.argv[2]
-    #   folder_name = sys.argv[3]
+    data_size = args.data_size
 
-    # load data and generate chars and normalize auxiliary
-    # load = LoadData(file_path)
-    # training_df = load.get_df_by_userids([train_user_id])
-    # chars_auxi = CharsAuxi(LoadData(file_path).get_df_by_userids([train_user_id]))
-
-    chars_auxi = CharsAuxi(LoadData(file_path).df_total)
+    load = LoadData(file_path, data_size)
+    words_auxi = CharsAuxi(load.input, load.auxiliary, load.user_attention, load.item_attention)
 
     # set parameters
-    num_auxiliary = chars_auxi.num_auxiliary
-    num_characters = len(chars_auxi.char_to_int)
+    num_auxiliary = load.auxiliary.shape[1]
+    vector_length = len(set(load.input))
+    num_user_attention = len(set(load.user_attention))
+    num_item_attention = len(set(load.item_attention))
 
     # num_batches = 10
     # batch_size = 10
     num_batches = args.num_batches
     batch_size = args.batch_size
-    num_char = len(chars_auxi.chars_review) // (num_batches * batch_size)
+    num_char = load.input.shape[0] // (num_batches * batch_size)
+
+    log.info("number of auxiliary: {}, vector length: {}, num char: {}, num attention: {}", num_auxiliary, vector_length, num_char, num_user_attention + num_item_attention)
 
     # lstm_size = 128
     # num_layers = 2
@@ -74,22 +74,34 @@ if __name__ == '__main__':
     checkpoint = args.checkpoint
     checkpoint_weights = args.checkpoint_weights
 
-    num_attention = chars_auxi.num_attention
-
     # generate concatenate one hot
-    x, y, auxi_x_one_hot, attention_x = chars_auxi.get_xy_auxiliary_attention(num_batches, batch_size, num_char)
+    # x, y = words_auxi.split_1d_date(words_auxi.input, num_batches, batch_size, num_char)
+    # auxiliary, _ = words_auxi.split_2d_date(words_auxi.auxiliary, num_batches, batch_size, num_char)
+    # user_attention_x, _ = words_auxi.split_1d_date(words_auxi.user_attention, num_batches, batch_size, num_char)
+    # item_attention_x, _ = words_auxi.split_1d_date(words_auxi.item_attention, num_batches, batch_size, num_char)
 
-    # train_x_one_hot, train_y_one_hot = chars_auxi.get_concate_data(num_characters=num_characters,
-    #                                                                num_batches=num_batches,
-    #                                                                batch_size=batch_size,
-    #                                                                num_char=num_char)
+    # split to train test
 
-    log.info("{}, {}, {}", x.shape, auxi_x_one_hot.shape, attention_x.shape)
+    frac = .9
+
+    num_train_batch = int(num_batches * frac)
+    num_test_batch = num_batches - num_train_batch
+
+    x, y, test_x, test_y = words_auxi.split_1d_date_by_frac(words_auxi.input, num_batches, batch_size, num_char, split_frac=frac)
+    auxiliary, _, test_auxiliary, _ = words_auxi.split_2d_date_by_frac(words_auxi.auxiliary, num_batches, batch_size, num_char, split_frac=frac)
+    user_attention_x, _, test_user_attention_x, _ = words_auxi.split_1d_date_by_frac(words_auxi.user_attention, num_batches, batch_size, num_char, split_frac=frac)
+    item_attention_x, _, test_item_attention_x, _ = words_auxi.split_1d_date_by_frac(words_auxi.item_attention, num_batches, batch_size, num_char, split_frac=frac)
+
+    log.info("{}, {}, {}, {}", x.shape, auxiliary.shape, user_attention_x.shape, item_attention_x.shape)
+    log.info("{}, {}, {}, {}", test_x.shape, test_auxiliary.shape, test_user_attention_x.shape, test_item_attention_x.shape)
+
 
     # training
-    lstm_model = LSTM(num_characters=num_characters,
+    lstm_model = LSTM(vector_length=vector_length,
                       num_auxiliary=num_auxiliary,
-                      num_attention=num_attention,
+                      num_user_attention=num_user_attention,
+                      num_item_attention=num_item_attention,
+                      num_batches=num_batches,
                       batch_size=batch_size,
                       num_char=num_char,
                       lstm_size=lstm_size,
@@ -101,20 +113,42 @@ if __name__ == '__main__':
 
     # sys.exit(1)
 
-    lstm_model.train_save(folder_to_save=folder_name,
-                          config_name=train_user_id,
-                          trained_user_name=train_user_id,
-                          chars_auxi=chars_auxi,
-                          train_x_one_hot=x,
-                          train_y_one_hot=y,
-                          auxi_x=auxi_x_one_hot,
-                          attention_x=attention_x,
-                          num_batches=num_batches,
-                          keep_prob=keep_prob,
-                          epochs_start=epochs_start,
-                          epochs_end=epochs_end,
-                          checkpoint=checkpoint,
-                          checkpoint_weights=checkpoint_weights)
+    # lstm_model.train_save(folder_to_save=folder_name,
+    #                       config_name=train_user_id,
+    #                       trained_user_name=train_user_id,
+    #                       words_auxi=words_auxi,
+    #                       x=x,
+    #                       y=y,
+    #                       auxiliary=auxiliary,
+    #                       user_attention=user_attention_x,
+    #                       item_attention=item_attention_x,
+    #                       keep_prob=keep_prob,
+    #                       epochs_start=epochs_start,
+    #                       epochs_end=epochs_end,
+    #                       checkpoint=checkpoint,
+    #                       checkpoint_weights=checkpoint_weights)
+
+    lstm_model.train_test_save(folder_to_save=folder_name,
+                               config_name=train_user_id,
+                               trained_user_name=train_user_id,
+                               words_auxi=words_auxi,
+                               x=x,
+                               y=y,
+                               test_x=test_x,
+                               test_y=test_y,
+                               auxiliary=auxiliary,
+                               test_auxiliary=test_auxiliary,
+                               user_attention=user_attention_x,
+                               test_user_attention_x=test_user_attention_x,
+                               item_attention=item_attention_x,
+                               test_item_attention_x=test_item_attention_x,
+                               num_train_batch=num_train_batch,
+                               num_test_batch=num_test_batch,
+                               keep_prob=keep_prob,
+                               epochs_start=epochs_start,
+                               epochs_end=epochs_end,
+                               checkpoint=checkpoint,
+                               checkpoint_weights=checkpoint_weights)
 
 
 
