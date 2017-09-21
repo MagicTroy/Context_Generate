@@ -1,5 +1,4 @@
-
-#!/usr/bin/env python2
+# !/usr/bin/env python2
 # -*- coding: utf-8 -*-
 """
 Created on Mon May 16 2017
@@ -16,16 +15,17 @@ from .load_data import LoadData
 from collections import Counter
 from sklearn.feature_extraction.text import CountVectorizer
 from .log import get_logger
+
 log = get_logger()
 
-class CharsAuxi:
 
+class CharsAuxi:
     def __init__(self, df):
         review = self._get_element(df, 'r_text')
         review = self.__insert_prime(review)
 
         self.char_to_int, self.int_to_char = self._get_chars_dict(review)
-        self.chars_review, self.auxi_one_hot = self._get_chars_auxi_one_hot(df, review)
+        self.chars_review, self.auxi_one_hot, self.attention_matrix = self._get_chars_auxi_one_hot_attention(df, review)
 
     def _get_num_chars_per_user(self, df):
         """
@@ -56,7 +56,7 @@ class CharsAuxi:
             _review.append(prime + text + end)
         return _review
 
-    def _get_element(self, df,  element):
+    def _get_element(self, df, element):
         return df[element].tolist()
 
     def _get_chars_dict(self, corpus):
@@ -90,7 +90,7 @@ class CharsAuxi:
             _dict[auxi] = np.eye(len(set(auxiliary)))[idx]
         return _dict
 
-    def get_char_int_auxi(self, c, auxiliary):
+    def get_char_int_auxi(self, c, auxiliary, attention):
         """
         get indices of a char and a lis tof auxiliary value list
         :param c:
@@ -101,9 +101,14 @@ class CharsAuxi:
         :param overa:
         :return:
         """
-        return self.char_to_int[c], np.array(auxiliary)
+        return self.char_to_int[c], np.array(auxiliary), np.array(attention)
+        # user_attention = np.zeros(self.max_user_attention)
+        # user_attention[attention[0]] = 1
+        # item_attention = np.zeros(self.max_item_attention)
+        # item_attention[attention[1]] = 1
+        # return self.char_to_int[c], np.array(auxiliary), np.concatenate((user_attention, item_attention), axis=1)
 
-    def _get_chars_auxi_one_hot(self, df, review):
+    def _get_chars_auxi_one_hot_attention(self, df, review):
         """
         get list of indices of a reviews
         get auxiliary one hot matrix
@@ -114,6 +119,7 @@ class CharsAuxi:
 
         chars = []
         auxi_one_hot_matrix = []
+        attention_matrix = []
 
         appear = self._get_element(df, 'r_appearance')
         aroma = self._get_element(df, 'r_aroma')
@@ -121,8 +127,8 @@ class CharsAuxi:
         taste = self._get_element(df, 'r_taste')
         rating = self._get_element(df, 'r_overall')
 
-        # user_id = self._get_element(df, 'user_id')
-        # item_id = self._get_element(df, 'beer_id')
+        user_id = self._get_element(df, 'user_id')
+        item_id = self._get_element(df, 'beer_id')
         #
         # self.num_auxiliary = len([appear, aroma, palate, taste, rating, user_id, item_id])
 
@@ -132,10 +138,13 @@ class CharsAuxi:
 
         self.num_auxiliary = len([appear, aroma, palate, taste, rating])
 
+        self.max_user_attention = np.max(user_id)
+        self.max_item_attention = np.max(item_id)
+        self.num_attention = self.max_user_attention + self.max_item_attention
+
         for i, re in enumerate(review):
             app, aro, pal, tas, ove = appear[i], aroma[i], palate[i], taste[i], rating[i]
-            # uid, iid = user_id[i], item_id[i]
-            # app, aro, pal, tas, ove = 1,1,1,1,1
+            uid, iid = user_id[i], item_id[i]
 
             # u_one_hot, i_one_hot = np.eye(len(set(user_id)))[uid], np.eye(len(set(item_id)))[iid]
 
@@ -143,14 +152,15 @@ class CharsAuxi:
 
             for c in re:
                 # char_int, auxi_one_hot = self.get_char_int_auxi(c, [app, aro, pal, tas, ove, uid, iid])
-                char_int, auxi_one_hot = self.get_char_int_auxi(c, [app, aro, pal, tas, ove])
+                char_int, auxi_one_hot, atten_x = self.get_char_int_auxi(c, [app, aro, pal, tas, ove], [uid, iid])
 
                 # auxi_one_hot = np.append(auxi_one_hot, ui_one_hot)
 
                 chars.append(char_int)
                 auxi_one_hot_matrix.append(auxi_one_hot)
+                attention_matrix.append(atten_x)
 
-        return np.array(chars), np.array(auxi_one_hot_matrix)
+        return np.array(chars), np.array(auxi_one_hot_matrix), np.array(attention_matrix)
 
     def _get_split_chars(self, chars, batch_size, num_char, split_frac=0.9):
         """
@@ -209,6 +219,7 @@ class CharsAuxi:
 
         return x, y
 
+    # version 0.1: get batch data from full one hot matrix
     def get_concate_data(self, num_characters, num_batches, batch_size, num_char):
         """
         get characters one hot
@@ -233,20 +244,21 @@ class CharsAuxi:
         # generate chars one hot
         def _get_one_hot(mm):
             return np.eye(num_characters)[mm]
+
         # train_x_one_hot = np.array(map(_get_one_hot, train_x))
         # train_y_one_hot = np.array(map(_get_one_hot, train_y))
         # val_x_one_hot = np.array(map(_get_one_hot, val_x))
         # val_y_one_hot = np.array(map(_get_one_hot, val_x))
 
         # https://docs.scipy.org/doc/numpy/reference/generated/numpy.fromiter.html
-        #train_x_one_hot = np.array([_get_one_hot(v) for v in x])
-        #train_y_one_hot = np.array([_get_one_hot(v) for v in y])
+        # train_x_one_hot = np.array([_get_one_hot(v) for v in x])
+        # train_y_one_hot = np.array([_get_one_hot(v) for v in y])
 
         ee = np.eye(num_characters)
         train_x_one_hot = np.array([ee[v].copy() for v in x])
-        print (sys.getsizeof(train_x_one_hot))
+        print(sys.getsizeof(train_x_one_hot))
         train_y_one_hot = np.array([ee[v].copy() for v in y])
-        print (sys.getsizeof(train_y_one_hot))
+        print(sys.getsizeof(train_y_one_hot))
 
         # concate
         # train_x_one_hot = np.concatenate((train_x_one_hot, auxi_train_x_one_hot), axis=2)
@@ -270,37 +282,48 @@ class CharsAuxi:
         for batch_idx in range(num_batches):
             yield [xy[:, batch_idx * num_char: (batch_idx + 1) * num_char] for xy in train_xy]
 
-
     # version 0.2: first get batched data, then concatenated each batch before trianing
-    
-    def get_xy_auxiliary(self, num_batches, batch_size, num_char):
+
+    def get_xy_auxiliary_attention(self, num_batches, batch_size, num_char):
         # split reviews
         x, y = self._get_split_chars(self.chars_review, batch_size, num_char)
 
-        log.info('shape: {}', x.shape, y.shape)
+        log.info('shape: {}, {}', x.shape, y.shape)
 
         # split auxiliary one hot
         auxi_x_one_hot, _ = self._get_split_auxi(self.auxi_one_hot, num_batches, batch_size, num_char)
-        
-        return x, y, auxi_x_one_hot
 
+        attention_x, _ = self._get_split_auxi(self.attention_matrix, num_batches, batch_size, num_char)
+
+        return x, y, auxi_x_one_hot, attention_x
 
     # use this generator to get each batch of dataset
-    def get_concat_batch(self, x, y, auxi_x, num_batches, num_char, num_characters):
+    def get_concat_batch(self, x, y, auxi_x, attention_x, num_batches, num_char, num_characters):
         for batch_idx in range(num_batches):
             xx = x[:, batch_idx * num_char: (batch_idx + 1) * num_char]
             yy = y[:, batch_idx * num_char: (batch_idx + 1) * num_char]
             a_x = auxi_x[:, batch_idx * num_char: (batch_idx + 1) * num_char]
-            
+            att_x = attention_x[:, batch_idx * num_char: (batch_idx + 1) * num_char]
+
             ee = np.eye(num_characters)
             train_x_one_hot = np.array([ee[v].copy() for v in xx])
             train_y_one_hot = np.array([ee[v].copy() for v in yy])
-            
-            train_x_one_hot = np.concatenate((train_x_one_hot, a_x), axis=2)
-            
-            yield train_x_one_hot, train_y_one_hot
 
-    # version 0.3: compute chars and auxiliary one hot in each batch
+            train_x_one_hot = np.concatenate((train_x_one_hot, a_x), axis=2)
+
+            att_x_input = []
+            att_x_input.append(self.get_one_hot(att_x[:, :, -1][0], self.max_user_attention))
+            att_x_input.append(self.get_one_hot(att_x[:, :, -1][1], self.max_item_attention))
+            att_x_input = np.concatenate((att_x_input[0], att_x_input[1]), axis=2)
+
+            print(att_x_input.shape)
+
+            yield train_x_one_hot, train_y_one_hot, att_x_input
+
+    def get_one_hot(self, v, length):
+        return np.eye(length)[v]
+
+    # version 0.3: compute chars and auxiliary one hot in each batch, user item one hot
     def get_concat_batch_one_hot(self, x, y, auxi_x, num_batches, num_char, num_characters):
         for batch_idx in range(num_batches):
             xx = x[:, batch_idx * num_char: (batch_idx + 1) * num_char]
@@ -317,7 +340,6 @@ class CharsAuxi:
                 _chars_auxi = []
 
                 for auxi in chars_auxi:
-
                     uid, iid = auxi[-2], auxi[-1]
                     u_one_hot, i_one_hot = np.eye(self.num_user)[int(uid)], np.eye(self.num_item)[int(iid)]
 
@@ -337,7 +359,7 @@ class CharsAuxi:
 
             yield train_x_one_hot, train_y_one_hot
 
-            
+
 """
 example
 

@@ -52,12 +52,13 @@ def save_checkpoint(folder_to_save, sess, epochs):
 
 
 class LSTM:
-    def __init__(self, num_characters, num_auxiliary, batch_size=50,
-                 num_char=50, lstm_size=128, num_layers=2,
+    def __init__(self, num_characters, num_auxiliary, num_attention,
+                 batch_size=50, num_char=50, lstm_size=128, num_layers=2,
                  learning_rate=0.001, grad_clip=5, sampling=False):
 
         self.num_characters = num_characters
         self.num_auxiliary = num_auxiliary
+        self.num_attention = num_attention
         self.batch_size = batch_size
         self.num_char = num_char
         self.lstm_size = lstm_size
@@ -68,6 +69,7 @@ class LSTM:
 
         self.model = self._build_rnn(num_classes=self.num_characters,
                                      num_auxiliary=self.num_auxiliary,
+                                     num_attention=self.num_attention,
                                      batch_size=self.batch_size,
                                      num_char=self.num_char,
                                      learning_rate=self.learning_rate,
@@ -76,7 +78,7 @@ class LSTM:
                                      grad_clip=self.grad_clip,
                                      sampling=self.sampling)
 
-    def _build_rnn(self, num_classes, num_auxiliary, batch_size=50, num_char=50, lstm_size=128, num_layers=2,
+    def _build_rnn(self, num_classes, num_auxiliary, num_attention, batch_size=50, num_char=50, lstm_size=128, num_layers=2,
                    learning_rate=0.001, grad_clip=5, sampling=False):
         # When we're using this network for sampling later, we'll be passing in
         # one character at a time, so providing an option for that
@@ -106,11 +108,8 @@ class LSTM:
         drop = tf.nn.rnn_cell.DropoutWrapper(lstm, output_keep_prob=keep_prob)
 
         # Stack up multiple LSTM layers, for deep learning
-        # using for loop to assign different weights in different layers
         cell = tf.nn.rnn_cell.MultiRNNCell([drop for _ in range(num_layers)])
-        # cell = tf.nn.rnn.MultiRNNCell([drop] * num_layers)
-
-        # self.init_lstm()
+        # cell = tf.nn.rnn_cell.MultiRNNCell([drop] * num_layers)
 
         initial_state = cell.zero_state(batch_size, tf.float32)
 
@@ -123,25 +122,115 @@ class LSTM:
         seq_output = tf.concat(outputs, axis=1)
         output = tf.reshape(seq_output, [-1, lstm_size])
 
-        # Now connect the RNN outputs to a softmax layer
-        with tf.variable_scope('softmax'):
-            # softmax_w = tf.Variable(tf.truncated_normal((lstm_size, num_classes+num_auxiliary), stddev=0.1))
-            # softmax_b = tf.Variable(tf.zeros(num_classes+num_auxiliary))
-            softmax_w = tf.Variable(tf.truncated_normal((lstm_size, num_classes), stddev=0.1))
-            softmax_b = tf.Variable(tf.zeros(num_classes))
+        ##
+        ## Attention layer
+        ##
 
-        # Since output is a bunch of rows of RNN cell outputs, logits will be a bunch
-        # of rows of logit outputs, one for each step and batch
+        attention_inputs = tf.placeholder(tf.float32, [batch_size, num_char, num_attention], name='attention_inputs')
+        attention_reshape_inputs = tf.reshape(attention_inputs, [-1, num_attention])
 
-        logits = tf.matmul(output, softmax_w) + softmax_b
+        # Calculate score
+        attention_score_inputs = tf.concat([output, attention_reshape_inputs], 1)
 
-        # Use softmax to get the probabilities for predicted characters
-        preds = tf.nn.softmax(logits, name='predictions')
+        with tf.variable_scope('attention_score'):
+            attention_score_w = tf.Variable(tf.truncated_normal((lstm_size + num_attention, 1), stddev=0.1))
+            # attention_score_b = tf.Variable(tf.zeros(batch_size * num_char))
+
+        # attention_score_logits = tf.matmul(attention_score_inputs, attention_score_w) + attention_score_b
+        # attention_score_logits = tf.matmul(attention_score_inputs, attention_score_w)
+
+        attention_score = tf.exp(tf.tanh(tf.matmul(attention_score_inputs, attention_score_w)))
+
+        attention_score = tf.transpose(tf.divide(attention_score, tf.reduce_sum(attention_score)))  # normalize
+
+        # Attention context vector
+        attention_score = tf.matmul(attention_score, attention_reshape_inputs)
+
+        # Attention state value
+        with tf.variable_scope('attention_state'):
+            attention_state_w1 = tf.Variable(tf.truncated_normal((lstm_size, num_attention), stddev=0.1))
+            attention_state_w2 = tf.Variable(tf.truncated_normal((lstm_size, lstm_size), stddev=0.1))
+
+        attention_state = tf.tanh(tf.matmul(attention_state_w1, tf.transpose(attention_score)) + tf.matmul(attention_state_w2, tf.transpose(output)))
+
+        # Attention prediction
+        with tf.variable_scope('attention_softmax'):
+            attention_softmax_w = tf.Variable(tf.truncated_normal((lstm_size, num_classes), stddev=0.1))
+            attention_softmax_b = tf.Variable(tf.zeros(num_classes))
+
+        attention_softmax_logits = tf.matmul(tf.transpose(attention_state), attention_softmax_w) + attention_softmax_b
+
+        preds = tf.nn.softmax(attention_softmax_logits, name='predictions')
+
+        ##
+        ## Attention layer end
+        ##
+
+        # ##
+        # ## Attention layer
+        # ##
+        #
+        # attention_inputs = tf.placeholder(tf.float32, [batch_size, num_char, num_attention], name='attention_inputs')
+        # attention_reshape_inputs = tf.reshape(attention_inputs, [-1, num_attention])
+        #
+        # # Calculate score
+        # attention_score_inputs = tf.concat([output, attention_reshape_inputs], 1)
+        #
+        # with tf.variable_scope('attention_score'):
+        #     attention_score_w = tf.Variable(tf.truncated_normal((lstm_size + num_attention, 1), stddev=0.1))
+        #     attention_score_b = tf.Variable(tf.zeros(batch_size * num_char))
+        #
+        # attention_score_logits = tf.matmul(attention_score_inputs, attention_score_w) + attention_score_b
+        #
+        # attention_score = tf.exp(tf.tanh(attention_score_logits))
+        #
+        # attention_score = tf.transpose(tf.divide(attention_score, tf.reduce_sum(attention_score))) #normalize
+        #
+        # # Attention context vector
+        # attention_context_vector = tf.matmul(attention_score, attention_reshape_inputs)
+        #
+        # # Attention state value
+        # with tf.variable_scope('attention_state'):
+        #     attention_state_w1 = tf.Variable(tf.truncated_normal((lstm_size, num_attention), stddev=0.1))
+        #     attention_state_w2 = tf.Variable(tf.truncated_normal((lstm_size, lstm_size), stddev=0.1))
+        #
+        # attention_state_logits1 = tf.matmul(attention_state_w1, tf.transpose(attention_context_vector))
+        # attention_state_logits2 = tf.matmul(attention_state_w2, tf.transpose(output))
+        #
+        # attention_state = tf.tanh(attention_state_logits1 + attention_state_logits2)
+        #
+        # # Attention prediction
+        # with tf.variable_scope('attention_softmax'):
+        #     attention_softmax_w = tf.Variable(tf.truncated_normal((lstm_size, num_classes), stddev=0.1))
+        #     attention_softmax_b = tf.Variable(tf.zeros(num_classes))
+        #
+        # attention_softmax_logits = tf.matmul(tf.transpose(attention_state), attention_softmax_w) + attention_softmax_b
+        #
+        # preds = tf.nn.softmax(attention_softmax_logits, name='predictions')
+        #
+        # ##
+        # ## Attention layer end
+        # ##
+
+        # # Now connect the RNN outputs to a softmax layer
+        # with tf.variable_scope('softmax'):
+        #     # softmax_w = tf.Variable(tf.truncated_normal((lstm_size, num_classes+num_auxiliary), stddev=0.1))
+        #     # softmax_b = tf.Variable(tf.zeros(num_classes+num_auxiliary))
+        #     softmax_w = tf.Variable(tf.truncated_normal((lstm_size, num_classes), stddev=0.1))
+        #     softmax_b = tf.Variable(tf.zeros(num_classes))
+        #
+        # # Since output is a bunch of rows of RNN cell outputs, logits will be a bunch
+        # # of rows of logit outputs, one for each step and batch
+        #
+        # logits = tf.matmul(output, softmax_w) + softmax_b
+        #
+        # # Use softmax to get the probabilities for predicted characters
+        # preds = tf.nn.softmax(logits, name='predictions')
 
         # Reshape the targets to match the logits
         # y_reshaped = tf.reshape(y_one_hot, [-1, num_classes+num_auxiliary])
         y_reshaped = tf.reshape(y_one_hot, [-1, num_classes])
-        loss = tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=y_reshaped)
+        loss = tf.nn.softmax_cross_entropy_with_logits(logits=attention_softmax_logits, labels=y_reshaped)
         cost = tf.reduce_mean(loss)
 
         # Optimizer for training, using gradient clipping to control exploding gradients
@@ -151,7 +240,7 @@ class LSTM:
         optimizer = train_op.apply_gradients(zip(grads, tvars))
 
         # Export the nodes
-        export_nodes = ['inputs', 'targets', 'initial_state', 'final_state',
+        export_nodes = ['inputs', 'targets', 'attention_inputs', 'initial_state', 'final_state',
                         'keep_prob', 'cost', 'preds', 'optimizer']
         Graph = namedtuple('Graph', export_nodes)
         local_dict = locals()
@@ -159,22 +248,16 @@ class LSTM:
 
         return graph
 
-    def init_lstm(self):
-        with tf.variable_scope("LSTM") as vs:
-            # Execute the LSTM cell here in any way, for example:
-            lstm_variables = [v for v in tf.all_variables()
-                              if v.name.startswith(vs.name)]
-
-            print(lstm_variables)
-
-    def _fit_model(self, sess, chars_auxi, x, y, auxi_x, num_batches, keep_prob):
+    def _fit_model(self, sess, chars_auxi, x, y, auxi_x, attention_x, num_batches, keep_prob):
         loss = []
         new_state = sess.run(self.model.initial_state)
 
         start = time.time()
-        for xx, yy in chars_auxi.get_concat_batch(x, y, auxi_x, num_batches, self.num_char, self.num_characters):
+        for xx, yy, zz in chars_auxi.get_concat_batch(x, y, auxi_x, attention_x,
+                                                      num_batches, self.num_char, self.num_characters):
             feed = {self.model.inputs: xx,
                     self.model.targets: yy,
+                    self.model.attention_inputs: zz,
                     self.model.keep_prob: keep_prob,
                     self.model.initial_state: new_state}
             batch_loss, new_state, _ = sess.run([self.model.cost,
@@ -188,8 +271,8 @@ class LSTM:
             start = current
         return np.mean(loss)
 
-    def _training(self, sess, chars_auxi, train_x, train_y, auxi_x, num_batches, keep_prob):
-        t_loss = self._fit_model(sess, chars_auxi, train_x, train_y, auxi_x, num_batches, keep_prob)
+    def _training(self, sess, chars_auxi, train_x, train_y, auxi_x, attention_x, num_batches, keep_prob):
+        t_loss = self._fit_model(sess, chars_auxi, train_x, train_y, auxi_x, attention_x, num_batches, keep_prob)
 
         #     print 'training'
         #     print training_loss
@@ -206,7 +289,7 @@ class LSTM:
             return lstm_variables
 
     def train_save(self, folder_to_save, config_name, trained_user_name, chars_auxi,
-                   train_x_one_hot, train_y_one_hot, auxi_x,
+                   train_x_one_hot, train_y_one_hot, auxi_x, attention_x,
                    num_batches, keep_prob=.5, epochs_start=0, epochs_end=10, checkpoint='', checkpoint_weights=''):
         start = time.time()
         saver = tf.train.Saver()
@@ -232,7 +315,7 @@ class LSTM:
                 # Train network
                 training_loss = self._training(sess, chars_auxi,
                                                train_x_one_hot, train_y_one_hot,
-                                               auxi_x, num_batches, keep_prob)
+                                               auxi_x, attention_x, num_batches, keep_prob)
 
                 end_ep = time.time()
 

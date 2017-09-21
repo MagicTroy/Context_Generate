@@ -1,6 +1,6 @@
 
-from NN.lstm import *
-from Util.chars_auxiliary_one_hot import *
+from NN.lstm_attention import *
+from Util.chars_auxiliary_attention import *
 
 
 def get_prim_one_hot_auxiliary_one_hot(chars_auxi, c, num_characters, appea, aroma, palat, taste, overa):

@@ -1,8 +1,9 @@
 
 import os
-from NN.lstm import LSTM
+
+from NN.lstm_attention import LSTM
 from Util.load_data import LoadData
-from Util.chars_auxiliary import CharsAuxi
+from Util.chars_auxiliary_attention import CharsAuxi
 
 import argparse
 import datetime
@@ -26,7 +27,7 @@ if __name__ == '__main__':
     parser.add_argument('--epochs_end', default=10, type=int)
     parser.add_argument('--checkpoint', default='')
     parser.add_argument('--checkpoint_weights', default='')
-    
+
     args = parser.parse_args()
 
     log.info('args: {}', args)
@@ -73,19 +74,22 @@ if __name__ == '__main__':
     checkpoint = args.checkpoint
     checkpoint_weights = args.checkpoint_weights
 
+    num_attention = chars_auxi.num_attention
+
     # generate concatenate one hot
-    x, y, auxi_x_one_hot = chars_auxi.get_xy_auxiliary(num_batches, batch_size, num_char)
+    x, y, auxi_x_one_hot, attention_x = chars_auxi.get_xy_auxiliary_attention(num_batches, batch_size, num_char)
 
     # train_x_one_hot, train_y_one_hot = chars_auxi.get_concate_data(num_characters=num_characters,
     #                                                                num_batches=num_batches,
     #                                                                batch_size=batch_size,
     #                                                                num_char=num_char)
 
-    log.info("{}, {}", x.shape, auxi_x_one_hot.shape)
+    log.info("{}, {}, {}", x.shape, auxi_x_one_hot.shape, attention_x.shape)
 
     # training
     lstm_model = LSTM(num_characters=num_characters,
                       num_auxiliary=num_auxiliary,
+                      num_attention=num_attention,
                       batch_size=batch_size,
                       num_char=num_char,
                       lstm_size=lstm_size,
@@ -95,6 +99,8 @@ if __name__ == '__main__':
 
     log.info("{}", checkpoint)
 
+    # sys.exit(1)
+
     lstm_model.train_save(folder_to_save=folder_name,
                           config_name=train_user_id,
                           trained_user_name=train_user_id,
@@ -102,6 +108,7 @@ if __name__ == '__main__':
                           train_x_one_hot=x,
                           train_y_one_hot=y,
                           auxi_x=auxi_x_one_hot,
+                          attention_x=attention_x,
                           num_batches=num_batches,
                           keep_prob=keep_prob,
                           epochs_start=epochs_start,
