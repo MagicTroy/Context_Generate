@@ -99,14 +99,16 @@ class LSTM:
 
         ### Build the RNN layers
         # Use a basic LSTM cell
-        lstm = tf.contrib.rnn.BasicLSTMCell(lstm_size)
+        lstm = tf.nn.rnn_cell.BasicLSTMCell(lstm_size)
 
         # Add dropout to the cell
         # prevent overfitting
-        drop = tf.contrib.rnn.DropoutWrapper(lstm, output_keep_prob=keep_prob)
+        drop = tf.nn.rnn_cell.DropoutWrapper(lstm, output_keep_prob=keep_prob)
 
         # Stack up multiple LSTM layers, for deep learning
-        cell = tf.contrib.rnn.MultiRNNCell([drop] * num_layers)
+        # using for loop to assign different weights in different layers
+        cell = tf.nn.rnn_cell.MultiRNNCell([drop for _ in range(num_layers)])
+        # cell = tf.nn.rnn.MultiRNNCell([drop] * num_layers)
 
         # self.init_lstm()
 
