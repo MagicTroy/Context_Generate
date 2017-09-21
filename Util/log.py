@@ -2,6 +2,7 @@ import sys
 
 import logbook
 from logbook import StreamHandler, Logger
+
 from .singles import Singleton
 
 _author__ = "Aonghus Lawlor"
