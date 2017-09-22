@@ -7,14 +7,12 @@ log = get_logger()
 
 
 class CharsAuxi:
-    def __init__(self, input, auxiliary, user_attention, item_attention):
+    def __init__(self, input, auxiliary, item_attention):
         # shape: (number of words, words vector)
         self.input = input
         # shape: (number of words, number of auxiliary)
         self.auxiliary = auxiliary
         # shape: (number of words, number of attention)
-        self.user_attention = user_attention
-
         self.item_attention = item_attention
 
     # # one hot type
@@ -23,22 +21,6 @@ class CharsAuxi:
     #     return np.array([ee[v].copy() for v in m])
 
     # word vector type
-
-    def concat_data(self, data_1, data_2, axis=2):
-        return np.concatenate((data_1, data_2), axis=axis)
-
-    def split_index(self, data, num_batches, batch_size, number_words_per_batch, split_frac=.9):
-        slice_size = batch_size * number_words_per_batch
-
-        x = data[: num_batches * slice_size]
-        y = data[1: num_batches * slice_size + 1]
-
-        # split full characters by batch size                                                                        \
-
-        x = np.stack(np.split(x, batch_size))
-        y = np.stack(np.split(y, batch_size))
-
-        return x, y
 
     def split_1d_date(self, data, num_batches, batch_size, number_words_per_batch):
         slice_size = batch_size * number_words_per_batch
@@ -58,43 +40,27 @@ class CharsAuxi:
         x = data[: num_batches * slice_size, :]
         y = data[1: num_batches * slice_size + 1, :]
 
+        print(x.shape, y.shape)
+
         # split full characters by batch size
         x = np.stack(np.split(x, batch_size))
         y = np.stack(np.split(y, batch_size))
 
         return x, y
 
-    def split_1d_date_by_frac(self, data, num_batches, batch_size, number_words_per_batch, split_frac=.9):
-        slice_size = batch_size * number_words_per_batch
+    def split_1d_date_test(self, data):
+        data_length = len(data)
+        x = data[: data_length - 1]
+        y = data[1: data_length]
 
-        x = data[: num_batches * slice_size]
-        y = data[1: num_batches * slice_size + 1]
+        return x, y
 
-        # split full characters by batch size
-        x = np.stack(np.split(x, batch_size))
-        y = np.stack(np.split(y, batch_size))
+    def split_2d_date_test(self, data):
+        data_length = data.shape[0]
+        x = data[: data_length - 1, :]
+        y = data[1: data_length, :]
 
-        split_idx = int(num_batches * split_frac)
-        train_x, train_y = x[:, :split_idx * number_words_per_batch], y[:, :split_idx * number_words_per_batch]
-        valid_x, valid_y = x[:, split_idx * number_words_per_batch:], y[:, split_idx * number_words_per_batch:]
-
-        return train_x, train_y, valid_x, valid_y
-
-    def split_2d_date_by_frac(self, data, num_batches, batch_size, number_words_per_batch, split_frac=.9):
-        slice_size = batch_size * number_words_per_batch
-
-        x = data[: num_batches * slice_size, :]
-        y = data[1: num_batches * slice_size + 1, :]
-
-        # split full characters by batch size
-        x = np.stack(np.split(x, batch_size))
-        y = np.stack(np.split(y, batch_size))
-
-        split_idx = int(num_batches * split_frac)
-        train_x, train_y = x[:, :split_idx * number_words_per_batch], y[:, :split_idx * number_words_per_batch]
-        valid_x, valid_y = x[:, split_idx * number_words_per_batch:], y[:, split_idx * number_words_per_batch:]
-
-        return train_x, train_y, valid_x, valid_y
+        return x, y
 
     def get_batch(self, x, y, attention, num_batches, number_words_per_batch):
         for batch_idx in range(num_batches):
